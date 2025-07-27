@@ -1,0 +1,9 @@
+# Ignore everything
+*
+
+# But not these files
+!LICENSE
+!README.md
+!jaillm.sh
+!setup.sh
+!.gitignore
