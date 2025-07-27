@@ -1,17 +1,17 @@
-# JailLM
+# BubbLM
 
-A lightweight sandboxing wrapper for running LLM agents and other commands with restricted filesystem access.
+A lightweight sandboxing wrapper for Claude (Anthropic's coding assistant) with restricted filesystem access.
 
 ## What it does
 
-JailLM runs any command in a sandbox where:
+BubbLM runs Claude in a secure sandbox where:
 - The entire filesystem is **read-only**
 - Write access is limited to:
   - Current working directory
   - `/tmp`
-  - MySQL/PostgreSQL sockets
+  - Claude's config files (`~/.claude.json`, `~/.claude/`)
 
-Perfect for running agentic coding tools that need to modify your project but shouldn't touch system files.
+Perfect for running Claude safely while preventing unwanted system modifications.
 
 ## Installation
 
@@ -21,39 +21,46 @@ sudo ./setup.sh
 ```
 
 The setup script will:
-- Install `firejail` if not present
-- Install the `jaillm` command globally
+- Install `bubblewrap` (bwrap) if not present
+- Install the `bubblm` command globally
 
 ## Usage
 
 ```bash
-# Run default (claude --dangerously-skip-permissions)
-jaillm
+# Run Claude (always with --dangerously-skip-permissions)
+bubblm
 
-# Run any command
-jaillm python script.py
-jaillm npm run dev
-jaillm cargo build
-```
-
-## Stateful defaults
-
-JailLM remembers your last command:
-
-```bash
-jaillm python app.py    # Sets python app.py as default
-jaillm                  # Now runs python app.py
-jaillm npm start        # Sets npm start as default  
-jaillm                  # Now runs npm start
+# Pass additional arguments to Claude
+bubblm --version
+bubblm --help
 ```
 
 ## Requirements
 
-- Linux with `firejail` support
+- Linux with `bubblewrap` support (works on WSL2)
 - `sudo` access for installation
+
+## Customizing for Other LLMs
+
+To adapt BubbLM for other LLM tools, edit `bubblm.sh`:
+
+1. **Change the command**: Replace `claude --dangerously-skip-permissions` with your LLM command
+2. **Update config bindings**: Modify the file/directory bindings for your LLM's config files
+
+For example, to use with a hypothetical "gpt-cli" that stores config in `~/.gpt/`:
+
+```bash
+# Replace lines 37-39 with:
+if [ -d "$HOME/.gpt" ]; then
+  BWRAP_CMD+=(--bind "$HOME/.gpt" "$HOME/.gpt")
+fi
+
+# Replace lines 46-47 with:
+  gpt-cli
+  "$@"
+```
 
 ## Files
 
-- `jaillm.sh` - The main sandboxing script
+- `bubblm.sh` - The main sandboxing script
 - `setup.sh` - Installer script
-- `~/.jaillm-default` - Stores your default command

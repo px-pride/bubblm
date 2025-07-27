@@ -1,5 +1,5 @@
 #!/bin/bash
-# Setup script for JailLM
+# Setup script for BubbLM
 
 set -e
 
@@ -26,24 +26,24 @@ detect_package_manager() {
     fi
 }
 
-# Function to get install command for firejail
+# Function to get install command for bubblewrap
 get_install_command() {
     local pkg_mgr=$1
     case $pkg_mgr in
         apt)
-            echo "sudo apt update && sudo apt install -y firejail"
+            echo "sudo apt update && sudo apt install -y bubblewrap"
             ;;
         dnf)
-            echo "sudo dnf install -y firejail"
+            echo "sudo dnf install -y bubblewrap"
             ;;
         yum)
-            echo "sudo yum install -y firejail"
+            echo "sudo yum install -y bubblewrap"
             ;;
         pacman)
-            echo "sudo pacman -S --noconfirm firejail"
+            echo "sudo pacman -S --noconfirm bubblewrap"
             ;;
         zypper)
-            echo "sudo zypper install -y firejail"
+            echo "sudo zypper install -y bubblewrap"
             ;;
         *)
             echo ""
@@ -51,11 +51,11 @@ get_install_command() {
     esac
 }
 
-# Check if firejail is installed
-if ! command -v firejail &> /dev/null; then
+# Check if bubblewrap is installed
+if ! command -v bwrap &> /dev/null; then
     # If running with sudo, auto-install without prompting
     if [ "$EUID" -eq 0 ]; then
-        echo -e "${YELLOW}Installing firejail...${NC}"
+        echo -e "${YELLOW}Installing bubblewrap...${NC}"
         
         # Detect package manager
         PKG_MGR=$(detect_package_manager)
@@ -63,19 +63,19 @@ if ! command -v firejail &> /dev/null; then
         # Install based on package manager
         case $PKG_MGR in
             apt)
-                apt update -qq && apt install -y -qq firejail
+                apt update -qq && apt install -y -qq bubblewrap
                 ;;
             dnf)
-                dnf install -y -q firejail
+                dnf install -y -q bubblewrap
                 ;;
             yum)
-                yum install -y -q firejail
+                yum install -y -q bubblewrap
                 ;;
             pacman)
-                pacman -S --noconfirm --quiet firejail
+                pacman -S --noconfirm --quiet bubblewrap
                 ;;
             zypper)
-                zypper install -y -q firejail
+                zypper install -y -q bubblewrap
                 ;;
             *)
                 echo -e "${RED}Unknown package manager${NC}"
@@ -84,14 +84,14 @@ if ! command -v firejail &> /dev/null; then
         esac
         
         # Verify installation
-        if ! command -v firejail &> /dev/null; then
-            echo -e "${RED}Firejail installation failed${NC}"
+        if ! command -v bwrap &> /dev/null; then
+            echo -e "${RED}Bubblewrap installation failed${NC}"
             exit 1
         fi
-        echo -e "${GREEN}✓ Firejail installed successfully${NC}"
+        echo -e "${GREEN}✓ Bubblewrap installed successfully${NC}"
     else
         # Not running with sudo - show instructions
-        echo -e "${YELLOW}Warning: firejail is not installed${NC}"
+        echo -e "${YELLOW}Warning: bubblewrap (bwrap) is not installed${NC}"
         
         # Detect package manager
         PKG_MGR=$(detect_package_manager)
@@ -100,11 +100,11 @@ if ! command -v firejail &> /dev/null; then
         if [ -n "$INSTALL_CMD" ]; then
             echo -e "\nRe-run this script with sudo to auto-install:"
             echo -e "${GREEN}sudo ./setup.sh${NC}"
-            echo -e "\nOr manually install firejail:"
+            echo -e "\nOr manually install bubblewrap:"
             echo -e "${GREEN}${INSTALL_CMD}${NC}"
         else
             echo -e "${RED}Could not detect package manager.${NC}"
-            echo -e "Please install firejail manually and re-run this script."
+            echo -e "Please install bubblewrap manually and re-run this script."
         fi
         exit 1
     fi
@@ -118,25 +118,25 @@ if [ ! -w "/usr/local/bin" ] && [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# Copy jaillm.sh to /usr/local/bin
-if [ -f "jaillm.sh" ]; then
+# Copy bubblm.sh to /usr/local/bin
+if [ -f "bubblm.sh" ]; then
     if [ "$EUID" -eq 0 ] || [ -w "/usr/local/bin" ]; then
-        cp jaillm.sh /usr/local/bin/jaillm
-        chmod +x /usr/local/bin/jaillm
-        echo -e "${GREEN}✓ Copied jaillm to /usr/local/bin${NC}"
+        cp bubblm.sh /usr/local/bin/bubblm
+        chmod +x /usr/local/bin/bubblm
+        echo -e "${GREEN}✓ Copied bubblm to /usr/local/bin${NC}"
     else
         echo -e "${RED}Cannot copy to /usr/local/bin without write permissions${NC}"
         exit 1
     fi
 else
-    echo -e "${RED}Error: jaillm.sh not found in current directory${NC}"
+    echo -e "${RED}Error: bubblm.sh not found in current directory${NC}"
     exit 1
 fi
 
 # Test if it works
-if command -v jaillm &> /dev/null; then
-    echo -e "${GREEN}✓ JailLM installed successfully!${NC}"
-    echo -e "\nYou can now use: ${GREEN}jaillm${NC}"
+if command -v bubblm &> /dev/null; then
+    echo -e "${GREEN}✓ BubbLM installed successfully!${NC}"
+    echo -e "\nYou can now use: ${GREEN}bubblm${NC}"
 else
     echo -e "${RED}Installation verification failed${NC}"
     exit 1

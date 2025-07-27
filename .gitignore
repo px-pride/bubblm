@@ -4,6 +4,6 @@
 # But not these files
 !LICENSE
 !README.md
-!jaillm.sh
+!bubblm.sh
 !setup.sh
 !.gitignore
