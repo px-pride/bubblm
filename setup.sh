@@ -112,8 +112,8 @@ fi
 
 # Check if we need sudo for copying to /usr/local/bin
 if [ ! -w "/usr/local/bin" ] && [ "$EUID" -ne 0 ]; then
-    echo -e "${YELLOW}Warning: Cannot write to /usr/local/bin without sudo${NC}"
-    echo -e "\nTo complete installation, run:"
+    echo -e "${RED}Error: This script requires sudo to install bubblm to /usr/local/bin${NC}"
+    echo -e "\nPlease run:"
     echo -e "${GREEN}sudo ./setup.sh${NC}"
     exit 1
 fi

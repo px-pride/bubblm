@@ -17,8 +17,10 @@ BWRAP_CMD=(
   --ro-bind / /
   --bind "$(pwd)" "$(pwd)"
   --bind /tmp /tmp
+  --bind /usr/local/bin /usr/local/bin
   --dev /dev
   --proc /proc
+  --bind /run /run
 )
 
 # Allow Claude to write to its config files if they exist
@@ -38,10 +40,10 @@ if [ -d "$HOME/.claude" ]; then
   BWRAP_CMD+=(--bind "$HOME/.claude" "$HOME/.claude")
 fi
 
+# Database socket access is now handled by binding /var/run above
+
 # Add remaining options
 BWRAP_CMD+=(
-  --unshare-all
-  --share-net
   --die-with-parent
   claude
   --dangerously-skip-permissions

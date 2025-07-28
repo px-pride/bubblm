@@ -2,6 +2,8 @@
 
 A lightweight sandboxing wrapper for Claude (Anthropic's coding assistant) with restricted filesystem access.
 
+> **⚠️ DEPRECATION NOTICE**: BubbLM has known compatibility issues with MySQL operations. Scripts requiring MySQL access (using `sudo mysql` or MySQL's auth_socket authentication) will fail within the sandbox due to bubblewrap's security model, which prevents privilege escalation. Consider running MySQL-dependent scripts outside the sandbox or using alternative sandboxing solutions.
+
 ## What it does
 
 BubbLM runs Claude in a secure sandbox where:
