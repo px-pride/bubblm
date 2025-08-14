@@ -5,5 +5,9 @@
 !LICENSE
 !README.md
 !bubblm.sh
+!bubblm_old.sh
 !setup.sh
 !.gitignore
+!sandbox-test/
+!sandbox-test/**
+!run-sandbox-test.sh
