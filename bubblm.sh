@@ -75,11 +75,11 @@ BWRAP_CMD=(
     --bind /tmp /tmp
     --bind /var/tmp /var/tmp
     
-    # Project directory (writable)
-    --bind "$PROJECT_DIR" "$PROJECT_DIR"
-    
     # Home directory setup (selective write access)
     --ro-bind "$HOME" "$HOME"
+    
+    # Project directory (writable) - MUST come after home directory to override
+    --bind "$PROJECT_DIR" "$PROJECT_DIR"
     
     # Writable home subdirectories
     --bind "$HOME/.claude-sandbox/cache" "$HOME/.cache"
@@ -128,10 +128,8 @@ BWRAP_CMD=(
     # Working directory
     --chdir "$PROJECT_DIR"
     
-    # Unshare user namespace for additional isolation
-    --unshare-user
-    --uid 1000
-    --gid 1000
+    # Note: Not using --unshare-user to allow proper file ownership and writing
+    # The filesystem isolation via bind mounts still provides security boundaries
     
     # The actual command
     -- "$COMMAND" "${ARGS[@]}"
