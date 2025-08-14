@@ -1,15 +1,25 @@
 #!/bin/bash
 
-# Claude Code Sandbox Runner with bwrap (bubblewrap)
-# This script creates a sandboxed environment for running Claude Code with
-# --dangerously-skip-permissions while minimizing risk of unwanted file edits
+# BubbLM - Bubblewrap Sandbox Runner
+# This script creates a sandboxed environment for running commands with restricted filesystem access
+# Usage: bubblm.sh [command] [args...]
+#        If no command given, runs Claude Code with --dangerously-skip-permissions
 
 set -euo pipefail
 
-# Configuration
-CLAUDE_CMD="${CLAUDE_CMD:-claude}"
-PROJECT_DIR="${1:-.}"  # First argument or current directory
-PROJECT_DIR="$(realpath "$PROJECT_DIR")"
+# Parse arguments
+if [ $# -eq 0 ]; then
+    # No arguments - run Claude Code
+    COMMAND="claude"
+    ARGS=("--dangerously-skip-permissions")
+    PROJECT_DIR="$(pwd)"
+else
+    # Arguments provided - run the specified command
+    COMMAND="$1"
+    shift
+    ARGS=("$@")
+    PROJECT_DIR="$(pwd)"
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -30,9 +40,9 @@ if ! command -v bwrap &> /dev/null; then
     exit 1
 fi
 
-# Check if Claude Code is accessible
-if ! command -v "$CLAUDE_CMD" &> /dev/null; then
-    log_error "Claude Code command '$CLAUDE_CMD' not found. Please ensure it's installed."
+# Check if command is accessible (only for claude)
+if [ "$COMMAND" = "claude" ] && ! command -v "$COMMAND" &> /dev/null; then
+    log_error "Claude Code command '$COMMAND' not found. Please ensure it's installed."
     exit 1
 fi
 
@@ -41,7 +51,8 @@ mkdir -p "$HOME/.claude-sandbox/cache"
 mkdir -p "$HOME/.claude-sandbox/config"
 mkdir -p "$HOME/.claude-sandbox/local"
 
-log_info "Setting up sandbox for project: $PROJECT_DIR"
+log_info "Setting up sandbox in: $PROJECT_DIR"
+log_info "Running command: $COMMAND ${ARGS[*]}"
 
 # Build the bwrap command
 BWRAP_CMD=(
@@ -123,7 +134,7 @@ BWRAP_CMD=(
     --gid 1000
     
     # The actual command
-    -- "$CLAUDE_CMD" --dangerously-skip-permissions
+    -- "$COMMAND" "${ARGS[@]}"
 )
 
 # Optional: Add database directories if they exist and are needed
@@ -139,24 +150,27 @@ fi
 
 # Show sandbox configuration
 log_info "Sandbox configuration:"
-echo "  - Project directory: $PROJECT_DIR (writable)"
+echo "  - Working directory: $PROJECT_DIR (writable)"
 echo "  - Cache directory: $HOME/.claude-sandbox/cache (writable)"
 echo "  - Config directory: $HOME/.claude-sandbox/config (writable)"
 echo "  - System directories: read-only"
 echo "  - Network: enabled"
-echo "  - Claude flags: --dangerously-skip-permissions"
 
-log_warn "Claude Code will run with autonomous permissions within the sandbox"
-log_warn "Project directory '$PROJECT_DIR' is fully writable"
+if [ "$COMMAND" = "claude" ]; then
+    log_warn "Claude Code will run with autonomous permissions within the sandbox"
+fi
+log_warn "Directory '$PROJECT_DIR' is fully writable"
 
-# Ask for confirmation
-read -p "Continue? (y/N) " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    log_info "Aborted by user"
-    exit 0
+# Ask for confirmation (skip for non-claude commands with -y flag)
+if [ "$COMMAND" = "claude" ] || [ "${SKIP_CONFIRM:-}" != "y" ]; then
+    read -p "Continue? (y/N) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        log_info "Aborted by user"
+        exit 0
+    fi
 fi
 
-# Execute the sandboxed Claude Code
-log_info "Starting Claude Code in sandbox..."
+# Execute the sandboxed command
+log_info "Starting in sandbox..."
 exec "${BWRAP_CMD[@]}"

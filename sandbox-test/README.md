@@ -13,16 +13,24 @@ This script attempts various file system operations that would be dangerous if n
 
 ## Usage
 
-Run the test from the bubblm directory:
+Run the test using bubblm from the sandbox-test directory:
 
 ```bash
-# From the bubblm directory
-./bubblm.sh ./sandbox-test/backup-system.sh
+# From the sandbox-test directory
+cd sandbox-test
+SKIP_CONFIRM=y ../bubblm.sh ./backup-system.sh
+```
+
+Or to see the confirmation prompt:
+```bash
+cd sandbox-test
+../bubblm.sh ./backup-system.sh
 ```
 
 Or with the older restrictive version:
 ```bash
-./bubblm_old.sh ./sandbox-test/backup-system.sh
+cd sandbox-test
+../bubblm_old.sh bash ./backup-system.sh
 ```
 
 ## What It Tests
