@@ -51,6 +51,10 @@ mkdir -p "$HOME/.claude-sandbox/cache"
 mkdir -p "$HOME/.claude-sandbox/config"
 mkdir -p "$HOME/.claude-sandbox/local"
 
+# Create Claude configuration files/directories if they don't exist
+[ -d "$HOME/.claude" ] || mkdir -p "$HOME/.claude"
+[ -f "$HOME/.claude.json" ] || touch "$HOME/.claude.json"
+
 log_info "Setting up sandbox in: $PROJECT_DIR"
 log_info "Running command: $COMMAND ${ARGS[*]}"
 
@@ -87,7 +91,8 @@ BWRAP_CMD=(
     --bind "$HOME/.claude-sandbox/local" "$HOME/.local"
     
     # Claude Code configuration (writable)
-    --bind-try "$HOME/.claude" "$HOME/.claude"
+    --bind "$HOME/.claude" "$HOME/.claude"
+    --bind "$HOME/.claude.json" "$HOME/.claude.json"
     
     # Package manager caches (writable if they exist)
     --bind-try "$HOME/.npm" "$HOME/.npm"
@@ -159,15 +164,7 @@ if [ "$COMMAND" = "claude" ]; then
 fi
 log_warn "Directory '$PROJECT_DIR' is fully writable"
 
-# Ask for confirmation (skip for non-claude commands with -y flag)
-if [ "$COMMAND" = "claude" ] || [ "${SKIP_CONFIRM:-}" != "y" ]; then
-    read -p "Continue? (y/N) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        log_info "Aborted by user"
-        exit 0
-    fi
-fi
+# Skip confirmation - proceed directly
 
 # Execute the sandboxed command
 log_info "Starting in sandbox..."
