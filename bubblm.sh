@@ -3,7 +3,9 @@
 # BubbLM - Bubblewrap Sandbox Runner
 # This script creates a sandboxed environment for running commands with restricted filesystem access
 # Usage: bubblm.sh [-w PATH]... [command] [args...]
-#        -w, --write PATH: Add additional writable directory (can be used multiple times)
+#        -w, --write PATH: Add additional writable directory
+#                          Can be used multiple times: -w /path1 -w /path2
+#                          Or with colon-separated paths: -w "/path1:/path2:/path3"
 #        If no command given, runs Claude Code with --dangerously-skip-permissions
 
 set -euo pipefail
@@ -23,17 +25,26 @@ while [[ $# -gt 0 ]] && [ "$PARSING_FLAGS" = true ]; do
                 echo "Error: $1 requires a path argument"
                 exit 1
             fi
-            # Convert to absolute path if relative
-            WRITE_PATH="$2"
-            if [[ ! "$WRITE_PATH" = /* ]]; then
-                WRITE_PATH="$(realpath "$WRITE_PATH")"
-            fi
-            EXTRA_WRITE_PATHS+=("$WRITE_PATH")
+            # Split on colons to support multiple paths
+            IFS=':' read -ra PATHS <<< "$2"
+            for WRITE_PATH in "${PATHS[@]}"; do
+                # Skip empty paths (from :: or trailing :)
+                if [ -z "$WRITE_PATH" ]; then
+                    continue
+                fi
+                # Convert to absolute path if relative
+                if [[ ! "$WRITE_PATH" = /* ]]; then
+                    WRITE_PATH="$(realpath "$WRITE_PATH")"
+                fi
+                EXTRA_WRITE_PATHS+=("$WRITE_PATH")
+            done
             shift 2
             ;;
         -*)
             echo "Error: Unknown flag: $1"
             echo "Usage: bubblm [-w PATH]... [command] [args...]"
+            echo "  -w PATH can be repeated: -w /path1 -w /path2"
+            echo "  -w PATH can use colons: -w \"/path1:/path2\""
             exit 1
             ;;
         *)
