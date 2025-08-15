@@ -1,5 +1,5 @@
 #!/bin/bash
-# Setup script for BubbLM
+# Setup script for BubbLM - Cross-platform
 
 set -e
 
@@ -8,6 +8,21 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[0;33m'
 NC='\033[0m'
+
+# Detect OS
+OS_TYPE="unknown"
+case "$(uname -s)" in
+    Darwin)
+        OS_TYPE="macos"
+        ;;
+    Linux)
+        OS_TYPE="linux"
+        ;;
+    *)
+        echo -e "${RED}Error: Unsupported operating system: $(uname -s)${NC}"
+        exit 1
+        ;;
+esac
 
 # Function to detect package manager
 detect_package_manager() {
@@ -51,8 +66,10 @@ get_install_command() {
     esac
 }
 
-# Check if bubblewrap is installed
-if ! command -v bwrap &> /dev/null; then
+# OS-specific dependency checks
+if [ "$OS_TYPE" = "linux" ]; then
+    # Check if bubblewrap is installed
+    if ! command -v bwrap &> /dev/null; then
     # If running with sudo, auto-install without prompting
     if [ "$EUID" -eq 0 ]; then
         echo -e "${YELLOW}Installing bubblewrap...${NC}"
@@ -107,6 +124,36 @@ if ! command -v bwrap &> /dev/null; then
             echo -e "Please install bubblewrap manually and re-run this script."
         fi
         exit 1
+    fi
+fi
+elif [ "$OS_TYPE" = "macos" ]; then
+    # Check for sandbox tools on macOS
+    echo -e "${GREEN}Checking for sandbox tools on macOS...${NC}"
+    
+    SANDBOX_AVAILABLE=false
+    
+    if command -v docker &> /dev/null; then
+        echo -e "${GREEN}✓ Docker found${NC}"
+        SANDBOX_AVAILABLE=true
+    elif command -v podman &> /dev/null; then
+        echo -e "${GREEN}✓ Podman found${NC}"
+        SANDBOX_AVAILABLE=true
+    elif command -v sandbox-exec &> /dev/null; then
+        echo -e "${YELLOW}✓ sandbox-exec found (deprecated)${NC}"
+        SANDBOX_AVAILABLE=true
+    fi
+    
+    if [ "$SANDBOX_AVAILABLE" = false ]; then
+        echo -e "${YELLOW}Warning: No sandbox tool found${NC}"
+        echo -e "\nFor best sandbox support on macOS, install one of:"
+        echo -e "${GREEN}  brew install --cask docker${NC}  # Docker Desktop"
+        echo -e "${GREEN}  brew install podman${NC}         # Podman"
+        echo -e "\nBubbLM will still be installed, but sandboxing may be limited."
+        read -p "Continue anyway? (y/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
     fi
 fi
 

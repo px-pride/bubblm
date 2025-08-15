@@ -1,11 +1,30 @@
 #!/bin/bash
 
-# BubbLM - Bubblewrap Sandbox Runner
+# BubbLM - Cross-platform Sandbox Runner
 # This script creates a sandboxed environment for running commands with restricted filesystem access
+# Supports Linux (bubblewrap) and macOS (sandbox-exec/Docker)
 # Usage: bubblm.sh [command] [args...]
 #        If no command given, runs Claude Code with --dangerously-skip-permissions
 
 set -euo pipefail
+
+# Detect operating system
+OS_TYPE="unknown"
+case "$(uname -s)" in
+    Darwin)
+        OS_TYPE="macos"
+        HOME_PREFIX="/Users"
+        ;;
+    Linux)
+        OS_TYPE="linux"
+        HOME_PREFIX="/home"
+        ;;
+    *)
+        echo "Error: Unsupported operating system: $(uname -s)"
+        echo "BubbLM currently supports Linux and macOS only"
+        exit 1
+        ;;
+esac
 
 # Parse arguments
 if [ $# -eq 0 ]; then
@@ -32,12 +51,34 @@ log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-# Check if bwrap is installed
-if ! command -v bwrap &> /dev/null; then
-    log_error "bubblewrap (bwrap) is not installed. Please install it first:"
-    echo "  sudo apt-get install bubblewrap  # Debian/Ubuntu"
-    echo "  sudo dnf install bubblewrap      # Fedora"
-    exit 1
+# Check for sandbox tool based on OS
+if [ "$OS_TYPE" = "linux" ]; then
+    # Check if bwrap is installed
+    if ! command -v bwrap &> /dev/null; then
+        log_error "bubblewrap (bwrap) is not installed. Please install it first:"
+        echo "  sudo apt-get install bubblewrap  # Debian/Ubuntu"
+        echo "  sudo dnf install bubblewrap      # Fedora"
+        exit 1
+    fi
+    SANDBOX_METHOD="bwrap"
+elif [ "$OS_TYPE" = "macos" ]; then
+    # Check for sandbox options on macOS
+    if command -v docker &> /dev/null; then
+        SANDBOX_METHOD="docker"
+        log_info "Using Docker for sandboxing on macOS"
+    elif command -v podman &> /dev/null; then
+        SANDBOX_METHOD="podman"
+        log_info "Using Podman for sandboxing on macOS"
+    elif command -v sandbox-exec &> /dev/null; then
+        SANDBOX_METHOD="sandbox-exec"
+        log_warn "Using deprecated sandbox-exec. Consider installing Docker or Podman for better isolation"
+    else
+        log_error "No sandbox tool found on macOS. Please install one of:"
+        echo "  - Docker Desktop: https://www.docker.com/products/docker-desktop"
+        echo "  - Podman: brew install podman"
+        echo "  - Or run without sandboxing (not recommended)"
+        exit 1
+    fi
 fi
 
 # Check if command is accessible (only for claude)
@@ -58,7 +99,10 @@ mkdir -p "$HOME/.claude-sandbox/local"
 log_info "Setting up sandbox in: $PROJECT_DIR"
 log_info "Running command: $COMMAND ${ARGS[*]}"
 
-# Build the bwrap command
+# Execute based on sandbox method
+case "$SANDBOX_METHOD" in
+    bwrap)
+        # Linux: Build the bwrap command
 BWRAP_CMD=(
     bwrap
     
@@ -169,3 +213,100 @@ log_warn "Directory '$PROJECT_DIR' is fully writable"
 # Execute the sandboxed command
 log_info "Starting in sandbox..."
 exec "${BWRAP_CMD[@]}"
+        ;;
+        
+    docker|podman)
+        # macOS: Use Docker or Podman container
+        CONTAINER_CMD="$SANDBOX_METHOD"
+        
+        log_info "Sandbox configuration (Docker/Podman):"
+        echo "  - Working directory: $PROJECT_DIR (writable)"
+        echo "  - Container image: alpine:latest"
+        echo "  - Network: enabled"
+        
+        # Build container command
+        CONTAINER_ARGS=(
+            run
+            --rm                           # Remove container after exit
+            -it                           # Interactive + TTY
+            --network host                # Use host network
+            -v "$PROJECT_DIR:$PROJECT_DIR" # Mount project directory
+            -v "$HOME/.claude:/root/.claude:rw" # Claude config
+            -v "$HOME/.claude.json:/root/.claude.json:rw" # Claude config file
+            -v "/tmp:/tmp:rw"             # Temp directory
+            -w "$PROJECT_DIR"             # Working directory
+            --env HOME=/root
+            --env USER=root
+            alpine:latest                 # Minimal Linux image
+            sh -c "apk add --no-cache bash nodejs npm python3 && $COMMAND ${ARGS[*]}"
+        )
+        
+        log_info "Starting container sandbox..."
+        exec "$CONTAINER_CMD" "${CONTAINER_ARGS[@]}"
+        ;;
+        
+    sandbox-exec)
+        # macOS: Use deprecated sandbox-exec with minimal profile
+        
+        # Create a temporary Seatbelt profile
+        PROFILE_FILE=$(mktemp /tmp/bubblm.XXXXXX.sb)
+        cat > "$PROFILE_FILE" << 'EOF'
+(version 1)
+(debug deny)
+(allow default)
+
+; Deny writes outside project directory and /tmp
+(deny file-write*
+    (regex "^/[^/]+")           ; Root level directories
+    (regex "^/Users/[^/]+/[^/]+") ; User home subdirectories
+    (subpath "/System")
+    (subpath "/Library")
+    (subpath "/Applications")
+    (subpath "/usr")
+    (subpath "/bin")
+    (subpath "/sbin")
+    (subpath "/etc")
+    (subpath "/var")
+    (subpath "/private"))
+
+; Allow writes to specific locations
+(allow file-write*
+    (subpath "PROJECT_DIR_PLACEHOLDER")
+    (subpath "/tmp")
+    (subpath "/private/tmp")
+    (subpath "/Users/USER_PLACEHOLDER/.claude")
+    (literal "/Users/USER_PLACEHOLDER/.claude.json"))
+
+; Allow network
+(allow network*)
+
+; Allow process execution
+(allow process*)
+EOF
+        
+        # Replace placeholders in profile
+        sed -i '' "s|PROJECT_DIR_PLACEHOLDER|$PROJECT_DIR|g" "$PROFILE_FILE"
+        sed -i '' "s|USER_PLACEHOLDER|$USER|g" "$PROFILE_FILE"
+        
+        log_info "Sandbox configuration (sandbox-exec):"
+        echo "  - Working directory: $PROJECT_DIR (writable)"
+        echo "  - Profile: Seatbelt (limited write access)"
+        echo "  - Network: enabled"
+        
+        log_warn "sandbox-exec is deprecated by Apple and may be removed in future macOS versions"
+        
+        # Execute with sandbox-exec
+        log_info "Starting sandbox-exec..."
+        sandbox-exec -f "$PROFILE_FILE" "$COMMAND" "${ARGS[@]}"
+        EXIT_CODE=$?
+        
+        # Clean up profile
+        rm -f "$PROFILE_FILE"
+        exit $EXIT_CODE
+        ;;
+        
+    *)
+        log_error "Unknown sandbox method: $SANDBOX_METHOD"
+        exit 1
+        ;;
+esac
