@@ -2,24 +2,58 @@
 
 # BubbLM - Bubblewrap Sandbox Runner
 # This script creates a sandboxed environment for running commands with restricted filesystem access
-# Usage: bubblm.sh [command] [args...]
+# Usage: bubblm.sh [-w PATH]... [command] [args...]
+#        -w, --write PATH: Add additional writable directory (can be used multiple times)
 #        If no command given, runs Claude Code with --dangerously-skip-permissions
 
 set -euo pipefail
 
+# Initialize arrays for extra writable paths
+EXTRA_WRITE_PATHS=()
+
 # Parse arguments
-if [ $# -eq 0 ]; then
-    # No arguments - run Claude Code
+PARSING_FLAGS=true
+COMMAND=""
+ARGS=()
+
+while [[ $# -gt 0 ]] && [ "$PARSING_FLAGS" = true ]; do
+    case "$1" in
+        -w|--write)
+            if [ -z "${2:-}" ]; then
+                echo "Error: $1 requires a path argument"
+                exit 1
+            fi
+            # Convert to absolute path if relative
+            WRITE_PATH="$2"
+            if [[ ! "$WRITE_PATH" = /* ]]; then
+                WRITE_PATH="$(realpath "$WRITE_PATH")"
+            fi
+            EXTRA_WRITE_PATHS+=("$WRITE_PATH")
+            shift 2
+            ;;
+        -*)
+            echo "Error: Unknown flag: $1"
+            echo "Usage: bubblm [-w PATH]... [command] [args...]"
+            exit 1
+            ;;
+        *)
+            # First non-flag argument is the command
+            COMMAND="$1"
+            shift
+            # Rest are arguments for the command
+            ARGS=("$@")
+            PARSING_FLAGS=false
+            ;;
+    esac
+done
+
+# If no command specified, default to Claude
+if [ -z "$COMMAND" ]; then
     COMMAND="claude"
     ARGS=("--dangerously-skip-permissions")
-    PROJECT_DIR="$(pwd)"
-else
-    # Arguments provided - run the specified command
-    COMMAND="$1"
-    shift
-    ARGS=("$@")
-    PROJECT_DIR="$(pwd)"
 fi
+
+PROJECT_DIR="$(pwd)"
 
 # Colors for output
 RED='\033[0;31m'
@@ -57,6 +91,12 @@ mkdir -p "$HOME/.claude-sandbox/local"
 
 log_info "Setting up sandbox in: $PROJECT_DIR"
 log_info "Running command: $COMMAND ${ARGS[*]}"
+if [ ${#EXTRA_WRITE_PATHS[@]} -gt 0 ]; then
+    log_info "Additional writable paths:"
+    for path in "${EXTRA_WRITE_PATHS[@]}"; do
+        echo "  - $path"
+    done
+fi
 
 # Build the bwrap command
 BWRAP_CMD=(
@@ -135,10 +175,24 @@ BWRAP_CMD=(
     
     # Note: Not using --unshare-user to allow proper file ownership and writing
     # The filesystem isolation via bind mounts still provides security boundaries
-    
-    # The actual command
-    -- "$COMMAND" "${ARGS[@]}"
 )
+
+# Add user-specified writable paths
+for path in "${EXTRA_WRITE_PATHS[@]}"; do
+    if [ -e "$path" ]; then
+        BWRAP_CMD+=(--bind "$path" "$path")
+    else
+        log_warn "Path does not exist, creating: $path"
+        mkdir -p "$path" 2>/dev/null || {
+            log_error "Cannot create path: $path"
+            exit 1
+        }
+        BWRAP_CMD+=(--bind "$path" "$path")
+    fi
+done
+
+# Add the command to execute
+BWRAP_CMD+=(-- "$COMMAND" "${ARGS[@]}")
 
 # Optional: Add database directories if they exist and are needed
 if [ -d "/var/lib/postgresql" ] && [ -n "${ENABLE_POSTGRES:-}" ]; then
@@ -154,6 +208,11 @@ fi
 # Show sandbox configuration
 log_info "Sandbox configuration:"
 echo "  - Working directory: $PROJECT_DIR (writable)"
+if [ ${#EXTRA_WRITE_PATHS[@]} -gt 0 ]; then
+    for path in "${EXTRA_WRITE_PATHS[@]}"; do
+        echo "  - Additional path: $path (writable)"
+    done
+fi
 echo "  - Cache directory: $HOME/.claude-sandbox/cache (writable)"
 echo "  - Config directory: $HOME/.claude-sandbox/config (writable)"
 echo "  - System directories: read-only"
