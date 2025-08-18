@@ -39,8 +39,11 @@ bubblm --help
 
 ## Requirements
 
-- Linux with `bubblewrap` support (works on WSL2)
+- **WSL2 (Windows Subsystem for Linux)** - Currently only tested and supported on WSL2
+- `bubblewrap` support
 - `sudo` access for installation
+
+> **Note**: Support for native Linux and other platforms is planned as future work. The current implementation includes WSL-specific DNS resolution handling that may need adjustment for other environments.
 
 ## Customizing for Other LLMs
 

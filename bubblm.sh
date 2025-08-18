@@ -171,6 +171,9 @@ BWRAP_CMD=(
     # Network access
     --share-net
     
+    # Mount /mnt for WSL symlinks (like /etc/resolv.conf -> /mnt/wsl/resolv.conf)
+    --ro-bind /mnt /mnt
+    
     # Environment preservation
     --setenv HOME "$HOME"
     --setenv USER "$USER"
