@@ -290,6 +290,9 @@ BWRAP_CMD=(
     # Project directory (writable) - MUST come after home directory to override
     --bind "$PROJECT_DIR" "$PROJECT_DIR"
     
+    # Make .git/hooks read-only to prevent modification of git hooks
+    --ro-bind-try "$PROJECT_DIR/.git/hooks" "$PROJECT_DIR/.git/hooks"
+    
     # Writable home subdirectories
     --bind "$HOME/.claude-sandbox/cache" "$HOME/.cache"
     --bind "$HOME/.claude-sandbox/config" "$HOME/.config"
