@@ -3,12 +3,8 @@
 # BubbLM - Bubblewrap Sandbox Runner
 # This script creates a sandboxed environment for running commands with restricted filesystem access
 # Usage: bubblm.sh [-w PATH]... [-d DB]... [command] [args...]
-#        -w, --write PATH: Add additional writable directory
-#                          Can be used multiple times: -w /path1 -w /path2
-#                          Or with colon-separated paths: -w "/path1:/path2:/path3"
-#        -d, --writable-db DB: Allow write access to specific database
-#                              Can be used multiple times: -d postgres -d mysql
-#                              Or with colon-separated names: -d "postgres:mysql:sqlite"
+#        -w, --write PATH: Add additional writable directory (can be used multiple times)
+#        -d, --writable-db DB: Allow write access to specific database (can be used multiple times)
 #        If no command given, runs Claude Code with --dangerously-skip-permissions
 #        Automatically installs protective git hooks if in a git repository
 
@@ -19,30 +15,22 @@ EXTRA_WRITE_PATHS=()
 WRITABLE_DATABASES=()
 
 # Parse arguments
-PARSING_FLAGS=true
 COMMAND=""
 ARGS=()
 
-while [[ $# -gt 0 ]] && [ "$PARSING_FLAGS" = true ]; do
+while [[ $# -gt 0 ]]; do
     case "$1" in
         -w|--write)
             if [ -z "${2:-}" ]; then
                 echo "Error: $1 requires a path argument"
                 exit 1
             fi
-            # Split on colons to support multiple paths
-            IFS=':' read -ra PATHS <<< "$2"
-            for WRITE_PATH in "${PATHS[@]}"; do
-                # Skip empty paths (from :: or trailing :)
-                if [ -z "$WRITE_PATH" ]; then
-                    continue
-                fi
-                # Convert to absolute path if relative
-                if [[ ! "$WRITE_PATH" = /* ]]; then
-                    WRITE_PATH="$(realpath "$WRITE_PATH")"
-                fi
-                EXTRA_WRITE_PATHS+=("$WRITE_PATH")
-            done
+            # Convert to absolute path if relative
+            if [[ ! "$2" = /* ]]; then
+                EXTRA_WRITE_PATHS+=("$(realpath "$2")")
+            else
+                EXTRA_WRITE_PATHS+=("$2")
+            fi
             shift 2
             ;;
         -d|--writable-db)
@@ -50,24 +38,12 @@ while [[ $# -gt 0 ]] && [ "$PARSING_FLAGS" = true ]; do
                 echo "Error: $1 requires a database argument"
                 exit 1
             fi
-            # Split on colons to support multiple databases
-            IFS=':' read -ra DBS <<< "$2"
-            for DB in "${DBS[@]}"; do
-                # Skip empty names (from :: or trailing :)
-                if [ -z "$DB" ]; then
-                    continue
-                fi
-                WRITABLE_DATABASES+=("$DB")
-            done
+            WRITABLE_DATABASES+=("$2")
             shift 2
             ;;
         -*)
             echo "Error: Unknown flag: $1"
             echo "Usage: bubblm [-w PATH]... [-d DB]... [command] [args...]"
-            echo "  -w PATH can be repeated: -w /path1 -w /path2"
-            echo "  -w PATH can use colons: -w \"/path1:/path2\""
-            echo "  -d DB can be repeated: -d postgres -d mysql"
-            echo "  -d DB can use colons: -d \"postgres:mysql\""
             exit 1
             ;;
         *)
@@ -76,7 +52,7 @@ while [[ $# -gt 0 ]] && [ "$PARSING_FLAGS" = true ]; do
             shift
             # Rest are arguments for the command
             ARGS=("$@")
-            PARSING_FLAGS=false
+            break
             ;;
     esac
 done
@@ -202,12 +178,18 @@ for file in $(git diff --cached --name-only); do
     fi
 done
 
-# Warn about filter-branch in commit message
-commit_msg=$(git diff --cached --name-only)
-if echo "$commit_msg" | grep -q "filter-branch"; then
-    echo "Warning: Detected 'filter-branch' - this operation rewrites history."
-    echo "Make sure you understand the implications before proceeding."
-fi
+# Check for common sensitive files
+sensitive_patterns="private_key|secret|password|token|\.env$|credentials"
+for file in $(git diff --cached --name-only); do
+    if echo "$file" | grep -qiE "$sensitive_patterns"; then
+        echo "Warning: File '$file' may contain sensitive information."
+        echo "Please review before committing. Continue? (y/N)"
+        read -r response
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+    fi
+done
 
 exit 0
 HOOK_EOF
@@ -217,57 +199,70 @@ HOOK_EOF
         log_warn "Git hook pre-commit already exists (user-defined), skipping protection"
     fi
     
-    if [ "$hooks_installed" -gt 0 ]; then
-        log_info "Installed $hooks_installed protective git hooks"
+    if [ $hooks_installed -gt 0 ]; then
+        log_info "Installed $hooks_installed protective git hook(s)"
     fi
+    
+    # Make hooks directory read-only to prevent modification
+    chmod -w ".git/hooks" 2>/dev/null || true
 }
 
-# Check if bwrap is installed
-if ! command -v bwrap &> /dev/null; then
-    log_error "bubblewrap (bwrap) is not installed. Please install it first:"
-    echo "  sudo apt-get install bubblewrap  # Debian/Ubuntu"
-    echo "  sudo dnf install bubblewrap      # Fedora"
-    exit 1
-fi
+# Install git hooks if in a git repository
+check_and_install_git_hooks
 
-# Check if command is accessible (only for claude)
-if [ "$COMMAND" = "claude" ] && ! command -v "$COMMAND" &> /dev/null; then
-    log_error "Claude Code command '$COMMAND' not found. Please ensure it's installed."
-    exit 1
-fi
-
-# Create necessary directories if they don't exist
+# Create sandbox directories if they don't exist
 mkdir -p "$HOME/.claude-sandbox/cache"
 mkdir -p "$HOME/.claude-sandbox/config"
 mkdir -p "$HOME/.claude-sandbox/local"
 
-# Create Claude configuration files/directories if they don't exist
-[ -d "$HOME/.claude" ] || mkdir -p "$HOME/.claude"
-[ -f "$HOME/.claude.json" ] || touch "$HOME/.claude.json"
-
-# Check and install git hooks if needed
-check_and_install_git_hooks
+# Check if bubblewrap is installed
+if ! command -v bwrap &> /dev/null; then
+    log_error "bubblewrap is not installed. Please install it first:"
+    echo "  Ubuntu/Debian: sudo apt-get install bubblewrap"
+    echo "  macOS: brew install bubblewrap"
+    echo "  Fedora: sudo dnf install bubblewrap"
+    exit 1
+fi
 
 log_info "Setting up sandbox in: $PROJECT_DIR"
-log_info "Running command: $COMMAND ${ARGS[*]}"
-if [ ${#EXTRA_WRITE_PATHS[@]} -gt 0 ]; then
-    log_info "Additional writable paths:"
-    for path in "${EXTRA_WRITE_PATHS[@]}"; do
-        echo "  - $path"
-    done
+if [ -n "$COMMAND" ]; then
+    log_info "Running command: $COMMAND ${ARGS[*]}"
+else
+    log_info "No command specified"
 fi
-if [ ${#WRITABLE_DATABASES[@]} -gt 0 ]; then
-    log_info "Writable databases:"
-    for db in "${WRITABLE_DATABASES[@]}"; do
-        echo "  - $db"
+
+# Show configuration
+log_info "Sandbox configuration:"
+echo "  - Working directory: $PROJECT_DIR (writable)"
+echo "  - Cache directory: $HOME/.claude-sandbox/cache (writable)"
+echo "  - Config directory: $HOME/.claude-sandbox/config (writable)"
+echo "  - System directories: read-only"
+echo "  - Database sockets: read-only"
+echo "  - Network: enabled"
+
+# Show extra write paths
+if [ ${#EXTRA_WRITE_PATHS[@]} -gt 0 ]; then
+    echo "  - Additional writable paths:"
+    for path in "${EXTRA_WRITE_PATHS[@]}"; do
+        echo "    - $path"
     done
 fi
 
-# Build the bwrap command
+# Show database write permissions
+if [ ${#WRITABLE_DATABASES[@]} -gt 0 ]; then
+    echo "  - Writable databases:"
+    for db in "${WRITABLE_DATABASES[@]}"; do
+        echo "    - $db"
+    done
+fi
+
+# Warn if potentially dangerous
+log_warn "Directory '$PROJECT_DIR' is fully writable"
+
+# Build bubblewrap command
 BWRAP_CMD=(
     bwrap
-    
-    # Basic filesystem setup
+    # Basic filesystem structure (read-only)
     --ro-bind /usr /usr
     --ro-bind /lib /lib
     --ro-bind /lib64 /lib64
@@ -275,34 +270,35 @@ BWRAP_CMD=(
     --ro-bind /sbin /sbin
     --ro-bind /etc /etc
     
-    # System resources (read-only)
+    # /sys for hardware info (read-only)
     --ro-bind /sys /sys
-    --proc /proc
+    
+    # /dev essentials
     --dev /dev
     
-    # Temporary directories (writable)
+    # Writable temp directories
     --bind /tmp /tmp
     --bind /var/tmp /var/tmp
     
-    # Home directory setup (selective write access)
+    # Home directory (read-only, with exceptions below)
     --ro-bind "$HOME" "$HOME"
     
-    # Project directory (writable) - MUST come after home directory to override
+    # Project directory (writable)
     --bind "$PROJECT_DIR" "$PROJECT_DIR"
     
-    # Make .git/hooks read-only to prevent modification of git hooks
+    # Make .git/hooks read-only to prevent escape via git hooks
     --ro-bind-try "$PROJECT_DIR/.git/hooks" "$PROJECT_DIR/.git/hooks"
     
-    # Writable home subdirectories
+    # Claude sandbox directories (writable)
     --bind "$HOME/.claude-sandbox/cache" "$HOME/.cache"
     --bind "$HOME/.claude-sandbox/config" "$HOME/.config"
     --bind "$HOME/.claude-sandbox/local" "$HOME/.local"
     
-    # Claude Code configuration (writable)
-    --bind "$HOME/.claude" "$HOME/.claude"
-    --bind "$HOME/.claude.json" "$HOME/.claude.json"
+    # Claude configuration files (if they exist)
+    --bind-try "$HOME/.claude" "$HOME/.claude"
+    --bind-try "$HOME/.claude.json" "$HOME/.claude.json"
     
-    # Package manager caches (writable if they exist)
+    # Package manager caches (writable)
     --bind-try "$HOME/.npm" "$HOME/.npm"
     --bind-try "$HOME/.yarn" "$HOME/.yarn"
     --bind-try "$HOME/.pnpm" "$HOME/.pnpm"
@@ -314,137 +310,110 @@ BWRAP_CMD=(
     --bind-try "$HOME/.nvm" "$HOME/.nvm"
     --bind-try "$HOME/.composer" "$HOME/.composer"
     
-    # Git configuration (read-only, but allow project .git)
+    # Git config (read-only)
     --ro-bind-try "$HOME/.gitconfig" "$HOME/.gitconfig"
     --ro-bind-try "$HOME/.ssh" "$HOME/.ssh"
     
-    # Database sockets - read-only by default unless explicitly allowed
+    # Database sockets (read-only by default)
     --ro-bind-try /var/run/postgresql /var/run/postgresql
     --ro-bind-try /var/run/mysqld /var/run/mysqld
     
-    # X11 forwarding for GUI applications (if needed)
+    # X11 socket for GUI apps
     --bind-try /tmp/.X11-unix /tmp/.X11-unix
+    
+    # /proc for process info
+    --proc /proc
+    
+    # Mount /mnt for WSL compatibility (for /mnt/wslg)
+    --ro-bind /mnt /mnt
     
     # Network access
     --share-net
     
-    # Mount /mnt for WSL symlinks (like /etc/resolv.conf -> /mnt/wsl/resolv.conf)
-    --ro-bind /mnt /mnt
+    # Hostname (requires --unshare-uts)
+    --unshare-uts
+    --hostname "sandbox"
     
-    # Environment preservation
-    --setenv HOME "$HOME"
-    --setenv USER "$USER"
-    --setenv TERM "$TERM"
-    --setenv LANG "${LANG:-en_US.UTF-8}"
-    --setenv PATH "$PATH"
+    # New session
+    --new-session
     
-    # Database write control
-    --setenv BUBBLM_WRITABLE_DBS "${WRITABLE_DATABASES[*]}"
-    --setenv BUBBLM_DB_READONLY "true"
-    
-    # Preserve display for GUI apps
-    --setenv DISPLAY "${DISPLAY:-}"
-    
-    # Working directory
-    --chdir "$PROJECT_DIR"
-    
-    # Note: Not using --unshare-user to allow proper file ownership and writing
-    # The filesystem isolation via bind mounts still provides security boundaries
+    # Die when parent dies
+    --die-with-parent
 )
 
-# Add user-specified writable paths
+# Add extra writable paths
 for path in "${EXTRA_WRITE_PATHS[@]}"; do
-    if [ -e "$path" ]; then
-        BWRAP_CMD+=(--bind "$path" "$path")
-    else
+    if [ ! -e "$path" ]; then
         log_warn "Path does not exist, creating: $path"
-        mkdir -p "$path" 2>/dev/null || {
-            log_error "Cannot create path: $path"
-            exit 1
-        }
+        mkdir -p "$path"
+    fi
+    if [ -d "$path" ]; then
         BWRAP_CMD+=(--bind "$path" "$path")
+        log_info "Added writable path: $path"
+    else
+        log_error "Path is not a directory: $path"
+        exit 1
     fi
 done
 
-# Override database socket bindings if write access is granted
+# Handle database write permissions
 for db in "${WRITABLE_DATABASES[@]}"; do
     case "$db" in
         postgres|postgresql)
-            # Remove read-only binding and add writable
-            if [ -e "/var/run/postgresql" ]; then
-                BWRAP_CMD+=(--bind /var/run/postgresql /var/run/postgresql)
-                log_info "PostgreSQL socket mounted with write access"
+            # PostgreSQL socket and data directories
+            for socket_dir in /var/run/postgresql /run/postgresql /tmp; do
+                if [ -d "$socket_dir" ] && ls "$socket_dir"/.s.PGSQL.* 2>/dev/null | grep -q .; then
+                    BWRAP_CMD+=(--bind "$socket_dir" "$socket_dir")
+                    log_info "PostgreSQL socket directory made writable: $socket_dir"
+                    break
+                fi
+            done
+            if [ -d /var/lib/postgresql ]; then
+                BWRAP_CMD+=(--bind /var/lib/postgresql /var/lib/postgresql)
+                log_info "PostgreSQL data directory made writable"
             fi
             ;;
         mysql|mariadb)
-            # Remove read-only binding and add writable
-            if [ -e "/var/run/mysqld" ]; then
-                BWRAP_CMD+=(--bind /var/run/mysqld /var/run/mysqld)
-                log_info "MySQL socket mounted with write access"
+            # MySQL/MariaDB socket and data directories
+            for socket_dir in /var/run/mysqld /run/mysqld /tmp; do
+                if [ -e "$socket_dir/mysqld.sock" ]; then
+                    BWRAP_CMD+=(--bind "$socket_dir" "$socket_dir")
+                    log_info "MySQL socket directory made writable: $socket_dir"
+                    break
+                fi
+            done
+            if [ -d /var/lib/mysql ]; then
+                BWRAP_CMD+=(--bind /var/lib/mysql /var/lib/mysql)
+                log_info "MySQL data directory made writable"
             fi
             ;;
-        sqlite:*)
-            # Extract path after sqlite:
-            db_path="${db#sqlite:}"
-            if [ -e "$db_path" ]; then
-                BWRAP_CMD+=(--bind "$db_path" "$db_path")
-                log_info "SQLite database $db_path mounted with write access"
-            else
-                log_warn "SQLite database $db_path does not exist"
-            fi
+        sqlite|sqlite3)
+            # SQLite doesn't need special handling - files are in project directory
+            log_info "SQLite write access enabled (project directory already writable)"
             ;;
         *)
-            log_warn "Unknown database type: $db"
+            log_warn "Unknown database type: $db (ignoring)"
             ;;
     esac
 done
 
-# Add the command to execute
-BWRAP_CMD+=(-- "$COMMAND" "${ARGS[@]}")
-
-# Database data directories - only if explicitly allowed
-for db in "${WRITABLE_DATABASES[@]}"; do
-    case "$db" in
-        postgres|postgresql)
-            if [ -d "/var/lib/postgresql" ]; then
-                BWRAP_CMD+=(--bind /var/lib/postgresql /var/lib/postgresql)
-                log_info "PostgreSQL data directory mounted with write access"
-            fi
-            ;;
-        mysql|mariadb)
-            if [ -d "/var/lib/mysql" ]; then
-                BWRAP_CMD+=(--bind /var/lib/mysql /var/lib/mysql)
-                log_info "MySQL data directory mounted with write access"
-            fi
-            ;;
-    esac
-done
-
-# Show sandbox configuration
-log_info "Sandbox configuration:"
-echo "  - Working directory: $PROJECT_DIR (writable)"
-if [ ${#EXTRA_WRITE_PATHS[@]} -gt 0 ]; then
-    for path in "${EXTRA_WRITE_PATHS[@]}"; do
-        echo "  - Additional path: $path (writable)"
-    done
-fi
-echo "  - Cache directory: $HOME/.claude-sandbox/cache (writable)"
-echo "  - Config directory: $HOME/.claude-sandbox/config (writable)"
-echo "  - System directories: read-only"
+# Export environment variables for database access
 if [ ${#WRITABLE_DATABASES[@]} -gt 0 ]; then
-    echo "  - Database sockets: selective write access"
-else
-    echo "  - Database sockets: read-only"
+    export BUBBLM_WRITABLE_DBS="${WRITABLE_DATABASES[*]}"
 fi
-echo "  - Network: enabled"
 
-if [ "$COMMAND" = "claude" ]; then
-    log_warn "Claude Code will run with autonomous permissions within the sandbox"
+# Export environment variable for extra write paths
+if [ ${#EXTRA_WRITE_PATHS[@]} -gt 0 ]; then
+    export BUBBLM_EXTRA_WRITE_PATHS="${EXTRA_WRITE_PATHS[*]}"
 fi
-log_warn "Directory '$PROJECT_DIR' is fully writable"
 
-# Skip confirmation - proceed directly
+# Set working directory
+BWRAP_CMD+=(--chdir "$PROJECT_DIR")
 
-# Execute the sandboxed command
+# Add command to run
+BWRAP_CMD+=("$COMMAND")
+BWRAP_CMD+=("${ARGS[@]}")
+
+# Run in sandbox
 log_info "Starting in sandbox..."
 exec "${BWRAP_CMD[@]}"

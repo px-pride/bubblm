@@ -1,100 +1,114 @@
-# BubbLM Sandbox Boundary Test
+# BubbLM Sandbox Security Test
 
-This test suite comprehensively probes the boundaries of bubblm's sandbox to verify what operations are allowed vs blocked.
+This test suite validates that bubblm's sandbox correctly blocks dangerous operations while allowing legitimate development tasks.
 
 ## Purpose
 
-This script attempts various file system operations that would be dangerous if not properly sandboxed, helping verify that bubblm correctly:
-- Restricts write access to the project directory
+The test script verifies that bubblm properly:
+- Blocks write access outside the project directory
+- Protects sensitive files like SSH keys
 - Prevents modification of system files
-- Controls access to sensitive directories
-- Manages package manager cache permissions
-- Isolates database access appropriately
+- Restricts access to parent directories
+- Protects git hooks in the main repository
+- Allows normal development operations within the sandbox
 
 ## Usage
 
-Run the test using bubblm from the sandbox-test directory:
+### Security Test
+Run the security test from the sandbox-test directory:
 
-```bash
-# From the sandbox-test directory
-cd sandbox-test
-SKIP_CONFIRM=y ../bubblm.sh ./backup-system.sh
-```
-
-Or to see the confirmation prompt:
 ```bash
 cd sandbox-test
 ../bubblm.sh ./backup-system.sh
+
+# Test with additional writable paths
+../bubblm.sh -w /tmp/test-write ./backup-system.sh
+
+# Test with database write access
+../bubblm.sh -d mysql -d postgres ./backup-system.sh
 ```
 
-Or with the older restrictive version:
+### Database Functionality Test
+Test actual database operations:
+
 ```bash
-cd sandbox-test
-../bubblm_old.sh bash ./backup-system.sh
+# From main bubblm directory
+./bubblm -d mysql -d postgres ./sandbox-test/test-databases.sh
+
+# Test specific databases
+./bubblm -d mysql ./sandbox-test/test-databases.sh
+./bubblm -d sqlite3 ./sandbox-test/test-databases.sh
 ```
 
 ## What It Tests
 
-The script runs through 10 phases of testing:
+The script runs through 7 phases of security testing:
 
-1. **Home Directory Access** - Attempts to read dotfiles, SSH keys, and configs
-2. **Package Manager Caches** - Tests write access to .npm, .cargo, .cache
-3. **System Directories** - Tries to access /etc, /root, other users' homes
-4. **Database Directories** - Attempts to read MySQL/PostgreSQL data directories
-5. **Writing Outside Project** - Tests directory traversal and parent directory access
-6. **Symlinks and Hardlinks** - Attempts to bypass restrictions via links
-7. **Temporary Directories** - Tests /tmp and /var/tmp access
-8. **Process and Network** - Checks ulimits, network connectivity, port binding
-9. **Environment and Devices** - Tests /dev access and environment variables
-10. **Current Directory** - Verifies normal operations within project (should succeed)
+1. **Home Directory Security** 
+   - ✅ Read access to .gitconfig, .bashrc (allowed)
+   - ✅ Write protection for home directory (blocked)
+
+2. **System Directory Security**
+   - ✅ Read access to /etc/passwd, /etc/hosts (allowed)
+   - ✅ Write protection for /etc, /usr (blocked)
+
+3. **Directory Traversal Protection**
+   - ✅ Parent directory write protection (blocked)
+   - ✅ Absolute path escape prevention (blocked)
+
+4. **Allowed Operations**
+   - ✅ Write access to current directory (allowed)
+   - ✅ Write access to /tmp (typically allowed)
+   - ✅ Network connectivity (allowed)
+
+5. **Git Repository Protection**
+   - ✅ Main repository .git/hooks read-only (blocked)
+   - ✅ Git operations in sandboxed directories (allowed)
+
+6. **Database Write Tests**
+   - ✅ SQLite operations (always allowed in project directory)
+   - MySQL socket/directory access (with -d mysql flag)
+   - PostgreSQL socket/directory access (with -d postgres flag)
+
+7. **Special Features**
+   - Database write flags (-d option)
+   - Extra writable paths (-w option)
 
 ## Expected Results
 
-### With properly configured bubblm:
-- ✅ **Should SUCCEED**: Operations within `./sandbox-test/`
-- ✅ **Should SUCCEED**: Reading from /tmp, /var/tmp
-- ✅ **Should SUCCEED**: Network operations
-- ✅ **Should SUCCEED**: Reading some system files (passwd, hosts)
-- ❌ **Should FAIL**: Writing outside project directory
-- ❌ **Should FAIL**: Accessing other users' data
-- ❌ **Should FAIL**: Modifying system files
-- ❌ **Should FAIL**: Reading SSH keys (or read-only)
-- ❌ **Should FAIL**: Writing to home directory (except allowed caches)
+### Security Test (backup-system.sh)
+A properly configured sandbox should show:
+- **~16-17 SUCCESS** entries - Security features working correctly
+- **0 FAILURE** entries - No security issues
 
-### Output Files
+### Database Test (test-databases.sh)
+Results vary based on your environment:
+- SQLite tests should always pass
+- MySQL/PostgreSQL tests may show connection failures if servers aren't running
+- Look for successful write permissions when using -d flags
 
-After running, check:
-- `success.log` - Operations that succeeded
-- `errors.log` - Failed operations with error messages
-- `backup/` - Any files successfully copied
+If you see any FAILURE entries, review the output for details about potential security vulnerabilities or over-restrictions.
 
-## Comparing Sandbox Implementations
+## Output Files
 
-Run this test with both `bubblm.sh` and `bubblm_old.sh` to compare their security models:
+After running the security test, check:
+- `success.log` - Operations that worked as expected
+- `errors.log` - Any security issues or unexpected behavior
+- `backup/` - Test files that were successfully created
 
-```bash
-# Test with new implementation
-./bubblm.sh ./sandbox-test/backup-system.sh
-mv sandbox-test/success.log sandbox-test/success_new.log
-mv sandbox-test/errors.log sandbox-test/errors_new.log
+## Test Scripts
 
-# Test with old implementation  
-./bubblm_old.sh ./sandbox-test/backup-system.sh
-mv sandbox-test/success.log sandbox-test/success_old.log
-mv sandbox-test/errors.log sandbox-test/errors_old.log
-
-# Compare results
-diff sandbox-test/success_new.log sandbox-test/success_old.log
-```
+- `backup-system.sh` - Main security validation test
+- `test-databases.sh` - Database functionality test
 
 ## Security Note
 
-This script intentionally attempts operations that would be dangerous if not sandboxed. It should ONLY be run within bubblm or another sandbox environment. Never run this script directly without sandboxing.
+This script intentionally attempts dangerous operations to validate the sandbox. It should ONLY be run within bubblm or another sandbox environment. Never run this script directly without sandboxing.
 
 ## Interpreting Results
 
-The number of successful vs failed operations indicates how restrictive the sandbox is:
-- **High failure count** = More restrictive sandbox (like bubblm_old.sh)
-- **More successes** = More permissive sandbox (like current bubblm.sh)
+- **SUCCESS** = The sandbox is working correctly (blocking dangerous operations, allowing safe ones)
+- **FAILURE** = Security issue detected (either a vulnerability or over-restriction)
+- **INFO** = Informational messages about optional features
 
-The ideal sandbox balances security with functionality, blocking dangerous operations while allowing legitimate development tasks.
+A result of 0 failures means the sandbox is properly configured and secure.

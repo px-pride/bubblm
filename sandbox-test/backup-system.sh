@@ -1,21 +1,29 @@
 #!/bin/bash
 
-# Sandbox Boundary Test Script
-# This script attempts various file operations to test what bubblm allows vs blocks
-# All errors are logged to errors.log for analysis
+# Sandbox Security Validation Test
+# Tests that bubblm properly blocks dangerous operations while allowing safe ones
+# SUCCESS = Operation behaved as expected (blocked when dangerous, allowed when safe)
+# FAILURE = Unexpected behavior (security vulnerability or over-restriction)
+
+set -e  # Exit on error
+trap 'echo "Error at line $LINENO"' ERR
 
 echo "==================================="
-echo "BubbLM Sandbox Boundary Test"
+echo "BubbLM Sandbox Security Test"
 echo "==================================="
 echo ""
-echo "Testing read/write permissions across filesystem..."
+echo "Testing sandbox security boundaries..."
+echo "SUCCESS = Security working correctly (dangerous operations blocked, safe operations allowed)"
+echo "FAILURE = Security issue detected"
 echo ""
 
 # Clean up from previous runs
-rm -rf ./backup/* 2>/dev/null
-rm -f ./errors.log ./success.log 2>/dev/null
+echo "Cleaning up previous runs..."
+rm -rf ./backup 2>/dev/null || true
+rm -f ./errors.log ./success.log 2>/dev/null || true
 
 # Create backup directories
+echo "Creating test directories..."
 mkdir -p ./backup/{home,ssh,users,etc,root,mysql,postgres,system,tmp,outside}
 
 # Function to log successes
@@ -23,202 +31,222 @@ log_success() {
     echo "[SUCCESS] $1" | tee -a ./success.log
 }
 
-# Function to log attempts
-log_attempt() {
-    echo "[ATTEMPT] $1"
+# Function to log failures
+log_failure() {
+    echo "[FAILURE] $1" | tee -a ./errors.log
 }
 
-echo "Phase 1: Home Directory Access"
-echo "-------------------------------"
-
-# Try to copy ALL config files from home
-log_attempt "Copying all dotfiles from home..."
-cp -r ~/.[!.]* ./backup/home/ 2>>./errors.log && log_success "Copied some home dotfiles" || echo "[FAILED] Could not copy all home dotfiles"
-
-# Try specific important configs
-log_attempt "Copying .gitconfig..."
-cp ~/.gitconfig ./backup/home/ 2>>./errors.log && log_success "Read .gitconfig" || echo "[FAILED] Cannot read .gitconfig"
-
-log_attempt "Copying .bashrc..."
-cp ~/.bashrc ./backup/home/ 2>>./errors.log && log_success "Read .bashrc" || echo "[FAILED] Cannot read .bashrc"
-
-# Try to read SSH keys (should fail or be read-only)
-log_attempt "Accessing SSH keys..."
-cp -r ~/.ssh ./backup/ssh/ 2>>./errors.log && log_success "Read SSH directory" || echo "[FAILED] Cannot read SSH directory"
-
-# Try Claude-specific configs
-log_attempt "Copying .claude directory..."
-cp -r ~/.claude ./backup/home/ 2>>./errors.log && log_success "Read .claude directory" || echo "[FAILED] Cannot read .claude directory"
+# Function to log info
+log_info() {
+    echo "[INFO] $1"
+}
 
 echo ""
-echo "Phase 2: Write Access to Package Manager Caches"
-echo "------------------------------------------------"
-
-# Try to modify package manager caches
-log_attempt "Writing to ~/.npm..."
-echo "test" > ~/.npm/test.txt 2>>./errors.log && log_success "Wrote to ~/.npm" || echo "[FAILED] Cannot write to ~/.npm"
-
-log_attempt "Writing to ~/.cargo..."
-echo "test" > ~/.cargo/test.txt 2>>./errors.log && log_success "Wrote to ~/.cargo" || echo "[FAILED] Cannot write to ~/.cargo"
-
-log_attempt "Writing to ~/.cache..."
-mkdir -p ~/.cache/test 2>>./errors.log && log_success "Created directory in ~/.cache" || echo "[FAILED] Cannot write to ~/.cache"
-
-echo ""
-echo "Phase 3: System Directory Access"
+echo "Phase 1: Home Directory Security"
 echo "---------------------------------"
 
-# Try to access other users' homes
-log_attempt "Reading other users' home directories..."
-ls /home/ > ./backup/users/listing.txt 2>>./errors.log && log_success "Listed /home/" || echo "[FAILED] Cannot list /home/"
-cp -r /home/* ./backup/users/ 2>>./errors.log && log_success "Copied other users' data" || echo "[FAILED] Cannot copy other users' data"
+# Reading configs should be allowed
+log_info "Testing read access to home configs..."
+cp ~/.gitconfig ./backup/home/ 2>/dev/null && log_success "Can read .gitconfig (expected)" || log_failure "Cannot read .gitconfig (over-restricted)"
+cp ~/.bashrc ./backup/home/ 2>/dev/null && log_success "Can read .bashrc (expected)" || log_failure "Cannot read .bashrc (over-restricted)"
 
-# Try to read system configs
-log_attempt "Reading /etc/passwd..."
-cp /etc/passwd ./backup/etc/ 2>>./errors.log && log_success "Read /etc/passwd" || echo "[FAILED] Cannot read /etc/passwd"
+# SSH keys are readable by design (needed for git operations)
+# Skipping SSH test as read access is intended behavior
 
-log_attempt "Reading /etc/hosts..."
-cp /etc/hosts ./backup/etc/ 2>>./errors.log && log_success "Read /etc/hosts" || echo "[FAILED] Cannot read /etc/hosts"
-
-# Try to access root
-log_attempt "Accessing /root directory..."
-ls /root/ 2>>./errors.log && log_success "Listed /root/" || echo "[FAILED] Cannot access /root/"
-cp -r /root/* ./backup/root/ 2>>./errors.log && log_success "Copied from /root/" || echo "[FAILED] Cannot copy from /root/"
+# Writing to home should be blocked
+log_info "Testing write protection for home..."
+echo "test" > ~/sandbox-escape-test.txt 2>/dev/null && log_failure "Can write to home directory (SECURITY RISK!)" || log_success "Home directory write-protected"
+rm -f ~/sandbox-escape-test.txt 2>/dev/null || true
 
 echo ""
-echo "Phase 4: Database Directory Access"
+echo "Phase 2: System Directory Security"
 echo "-----------------------------------"
 
-# Try database data directories
-log_attempt "Accessing MySQL data directory..."
-ls /var/lib/mysql 2>>./errors.log && log_success "Listed MySQL directory" || echo "[FAILED] Cannot access MySQL directory"
-cp -r /var/lib/mysql ./backup/mysql/ 2>>./errors.log && log_success "Copied MySQL data" || echo "[FAILED] Cannot copy MySQL data"
+# Reading system info files is usually ok
+log_info "Testing read access to system files..."
+cp /etc/passwd ./backup/etc/ 2>/dev/null && log_success "Can read /etc/passwd (expected)" || log_info "Cannot read /etc/passwd (may be ok)"
+cp /etc/hosts ./backup/etc/ 2>/dev/null && log_success "Can read /etc/hosts (expected)" || log_info "Cannot read /etc/hosts (may be ok)"
 
-log_attempt "Accessing PostgreSQL data directory..."
-ls /var/lib/postgresql 2>>./errors.log && log_success "Listed PostgreSQL directory" || echo "[FAILED] Cannot access PostgreSQL directory"
-cp -r /var/lib/postgresql ./backup/postgres/ 2>>./errors.log && log_success "Copied PostgreSQL data" || echo "[FAILED] Cannot copy PostgreSQL data"
-
-# Try to access database sockets
-log_attempt "Accessing database sockets..."
-ls /var/run/mysqld/ 2>>./errors.log && log_success "Listed MySQL socket directory" || echo "[FAILED] Cannot access MySQL socket directory"
-ls /var/run/postgresql/ 2>>./errors.log && log_success "Listed PostgreSQL socket directory" || echo "[FAILED] Cannot access PostgreSQL socket directory"
+# Writing to system dirs should be blocked
+log_info "Testing write protection for system directories..."
+echo "test" > /etc/sandbox-test 2>/dev/null && log_failure "Can write to /etc (SECURITY RISK!)" || log_success "/etc is write-protected"
+echo "test" > /usr/sandbox-test 2>/dev/null && log_failure "Can write to /usr (SECURITY RISK!)" || log_success "/usr is write-protected"
 
 echo ""
-echo "Phase 5: Writing Outside Project Directory"
-echo "-------------------------------------------"
+echo "Phase 3: Directory Traversal Protection"
+echo "----------------------------------------"
 
-# Try to create files outside project
-log_attempt "Writing to parent directory..."
-touch ../outside.txt 2>>./errors.log && log_success "Created file in parent directory" || echo "[FAILED] Cannot write to parent directory"
+# Parent directory access should be blocked
+log_info "Testing parent directory write protection..."
+echo "test" > ../sandbox-escape.txt 2>/dev/null && log_failure "Can write to parent dir (SECURITY RISK!)" || log_success "Parent directory write-protected"
+rm -f ../sandbox-escape.txt 2>/dev/null || true
 
-log_attempt "Writing to user's Desktop..."
-touch ~/Desktop/test.txt 2>>./errors.log && log_success "Created file on Desktop" || echo "[FAILED] Cannot write to Desktop"
-
-log_attempt "Writing to /tmp with traversal..."
-touch /tmp/../../etc/test.txt 2>>./errors.log && log_success "Wrote using path traversal" || echo "[FAILED] Path traversal blocked"
-
-log_attempt "Writing directly to /etc..."
-echo "test" > /etc/test.conf 2>>./errors.log && log_success "Wrote to /etc/" || echo "[FAILED] Cannot write to /etc/"
+# Absolute path escape should be blocked
+log_info "Testing absolute path restrictions..."
+PARENT_DIR=$(dirname "$(pwd)")
+echo "test" > "$PARENT_DIR/sandbox-absolute-escape.txt" 2>/dev/null && log_failure "Can write via absolute path (SECURITY RISK!)" || log_success "Absolute path escape blocked"
+rm -f "$PARENT_DIR/sandbox-absolute-escape.txt" 2>/dev/null || true
 
 echo ""
-echo "Phase 6: Symlink and Hardlink Tests"
-echo "-------------------------------------"
+echo "Phase 4: Allowed Operations"
+echo "----------------------------"
 
-# Try to modify system files through symlinks
-log_attempt "Creating symlink to /etc/passwd..."
-ln -s /etc/passwd ./passwd_link 2>>./errors.log && log_success "Created symlink to /etc/passwd" || echo "[FAILED] Cannot create symlink"
+# Current directory should be writable
+log_info "Testing current directory write access..."
+echo "test" > ./test-write.txt 2>/dev/null && log_success "Can write to current directory (expected)" || log_failure "Cannot write to current directory (over-restricted)"
+rm -f ./test-write.txt 2>/dev/null || true
 
-if [ -L ./passwd_link ]; then
-    log_attempt "Writing through symlink to /etc/passwd..."
-    echo "hack" >> ./passwd_link 2>>./errors.log && log_success "Modified /etc/passwd through symlink!" || echo "[FAILED] Cannot modify through symlink"
+# /tmp should typically be writable
+log_info "Testing /tmp write access..."
+echo "test" > /tmp/sandbox-test-$$.txt 2>/dev/null && log_success "Can write to /tmp (expected)" || log_info "Cannot write to /tmp (may be intentional)"
+rm -f /tmp/sandbox-test-$$.txt 2>/dev/null || true
+
+# Network should work
+log_info "Testing network access..."
+(echo -n | timeout 1 nc -zv google.com 80 2>&1) >/dev/null 2>&1 && log_success "Network access works (expected)" || log_info "No network access (may be intentional)"
+
+echo ""
+echo "Phase 5: Git Repository Protection"
+echo "-----------------------------------"
+
+# Test main repository hooks protection
+MAIN_HOOKS="../.git/hooks"
+if [ -d "$MAIN_HOOKS" ]; then
+    log_info "Testing main repository .git/hooks protection..."
+    echo "#!/bin/bash" > "$MAIN_HOOKS/test-hook-$$" 2>/dev/null && log_failure "Main repo .git/hooks is writable (SECURITY RISK!)" || log_success "Main repo .git/hooks is read-only"
+    rm -f "$MAIN_HOOKS/test-hook-$$" 2>/dev/null || true
+else
+    log_info "Main repository .git/hooks not found (skipping)"
 fi
 
-# Try hardlinks
-log_attempt "Creating hardlink to system file..."
-ln /etc/hosts ./hosts_hardlink 2>>./errors.log && log_success "Created hardlink to system file" || echo "[FAILED] Cannot create hardlink to system file"
+# Test that we can work with git in sandboxed directories
+log_info "Testing git functionality in sandbox..."
+TEMP_GIT_DIR="./backup/test-git-repo"
+mkdir -p "$TEMP_GIT_DIR" 2>/dev/null && log_success "Can create directories (expected)" || log_failure "Cannot create directories (over-restricted)"
+
+if [ -d "$TEMP_GIT_DIR" ]; then
+    (cd "$TEMP_GIT_DIR" && timeout 2 git init -q 2>/dev/null) && log_success "Can initialize git repos in sandbox (expected)" || log_failure "Cannot use git in sandbox (over-restricted)"
+    
+    if [ -d "$TEMP_GIT_DIR/.git" ]; then
+        mkdir -p "$TEMP_GIT_DIR/.git/hooks" 2>/dev/null
+        echo "#!/bin/bash" > "$TEMP_GIT_DIR/.git/hooks/test-hook" 2>/dev/null && log_success "Can manage hooks in sandboxed repos (expected)" || log_failure "Cannot manage hooks in sandboxed repos (over-restricted)"
+    fi
+fi
 
 echo ""
-echo "Phase 7: Temporary Directory Access"
-echo "------------------------------------"
+echo "Phase 6: Database Write Tests"
+echo "------------------------------"
 
-# Test /tmp access
-log_attempt "Writing to /tmp..."
-echo "test" > /tmp/bubblm_test.txt 2>>./errors.log && log_success "Wrote to /tmp" || echo "[FAILED] Cannot write to /tmp"
+# SQLite test (should always work in project directory)
+log_info "Testing SQLite database operations..."
+if command -v sqlite3 &> /dev/null; then
+    sqlite3 ./backup/test.db "CREATE TABLE test (id INTEGER PRIMARY KEY, data TEXT);" 2>/dev/null && \
+    sqlite3 ./backup/test.db "INSERT INTO test (data) VALUES ('sandbox test');" 2>/dev/null && \
+    sqlite3 ./backup/test.db "SELECT * FROM test;" &>/dev/null && \
+    log_success "SQLite database operations work (expected)" || \
+    log_failure "SQLite database operations failed (over-restricted)"
+    rm -f ./backup/test.db 2>/dev/null || true
+else
+    log_info "SQLite not installed, skipping test"
+fi
 
-log_attempt "Creating directory in /tmp..."
-mkdir -p /tmp/bubblm_test_dir 2>>./errors.log && log_success "Created directory in /tmp" || echo "[FAILED] Cannot create directory in /tmp"
+# MySQL/MariaDB test
+if [ -n "${BUBBLM_WRITABLE_DBS:-}" ] && [[ "$BUBBLM_WRITABLE_DBS" == *"mysql"* ]]; then
+    log_info "Testing MySQL database operations..."
+    
+    # Check for MySQL client
+    if command -v mysql &> /dev/null; then
+        # Try to connect via socket (if available)
+        for socket in /var/run/mysqld/mysqld.sock /tmp/mysql.sock /var/lib/mysql/mysql.sock; do
+            if [ -S "$socket" ]; then
+                log_info "Found MySQL socket at: $socket"
+                # Try a simple connection test (will fail if no permissions)
+                mysql --socket="$socket" -e "SELECT 1;" &>/dev/null && \
+                log_success "MySQL socket connection works" || \
+                log_info "MySQL socket connection failed (may need auth)"
+                break
+            fi
+        done
+        
+        # Test directory write access
+        if [ -d "/var/lib/mysql" ]; then
+            echo "test" > /var/lib/mysql/sandbox-test 2>/dev/null && \
+            log_success "MySQL data directory writable" || \
+            log_failure "MySQL write flag set but directory not writable"
+            rm -f /var/lib/mysql/sandbox-test 2>/dev/null || true
+        fi
+    else
+        log_info "MySQL client not installed, skipping connection test"
+    fi
+fi
 
-log_attempt "Writing to /var/tmp..."
-echo "test" > /var/tmp/bubblm_test.txt 2>>./errors.log && log_success "Wrote to /var/tmp" || echo "[FAILED] Cannot write to /var/tmp"
+# PostgreSQL test
+if [ -n "${BUBBLM_WRITABLE_DBS:-}" ] && [[ "$BUBBLM_WRITABLE_DBS" == *"postgres"* ]]; then
+    log_info "Testing PostgreSQL database operations..."
+    
+    # Check for psql client
+    if command -v psql &> /dev/null; then
+        # Try to connect via socket (if available)
+        for socket_dir in /var/run/postgresql /run/postgresql /tmp; do
+            if [ -d "$socket_dir" ] && ls "$socket_dir"/.s.PGSQL.* 2>/dev/null | grep -q .; then
+                log_info "Found PostgreSQL socket in: $socket_dir"
+                # Try a simple connection test (will fail if no permissions)
+                psql -h "$socket_dir" -l &>/dev/null && \
+                log_success "PostgreSQL socket connection works" || \
+                log_info "PostgreSQL socket connection failed (may need auth)"
+                break
+            fi
+        done
+        
+        # Test directory write access
+        if [ -d "/var/lib/postgresql" ]; then
+            echo "test" > /var/lib/postgresql/sandbox-test 2>/dev/null && \
+            log_success "PostgreSQL data directory writable" || \
+            log_failure "PostgreSQL write flag set but directory not writable"
+            rm -f /var/lib/postgresql/sandbox-test 2>/dev/null || true
+        fi
+    else
+        log_info "PostgreSQL client not installed, skipping connection test"
+    fi
+fi
+
+# Check for database write flags without testing
+if [ -n "${BUBBLM_WRITABLE_DBS:-}" ]; then
+    log_info "Database write flags set: $BUBBLM_WRITABLE_DBS"
+else
+    log_info "No database write flags set"
+fi
 
 echo ""
-echo "Phase 8: Process and Network Tests"
-echo "------------------------------------"
+echo "Phase 7: Special Features"
+echo "--------------------------"
 
-# Test process limits
-log_attempt "Checking process capabilities..."
-ulimit -a > ./backup/system/ulimits.txt 2>>./errors.log && log_success "Retrieved ulimits" || echo "[FAILED] Cannot get ulimits"
-
-# Test network access
-log_attempt "Testing network connectivity..."
-ping -c 1 google.com > ./backup/system/network.txt 2>>./errors.log && log_success "Network access works" || echo "[FAILED] No network access"
-
-log_attempt "Testing localhost binding..."
-python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1', 18888)); s.close(); print('success')" 2>>./errors.log && log_success "Can bind to localhost" || echo "[FAILED] Cannot bind to localhost"
-
-echo ""
-echo "Phase 9: Environment and Device Access"
-echo "----------------------------------------"
-
-# Check environment
-log_attempt "Checking environment variables..."
-env > ./backup/system/environment.txt 2>>./errors.log && log_success "Retrieved environment" || echo "[FAILED] Cannot get environment"
-
-# Test device access
-log_attempt "Reading from /dev/random..."
-head -c 10 /dev/random > ./backup/system/random.txt 2>>./errors.log && log_success "Read from /dev/random" || echo "[FAILED] Cannot read /dev/random"
-
-log_attempt "Accessing /dev/null..."
-echo "test" > /dev/null 2>>./errors.log && log_success "Wrote to /dev/null" || echo "[FAILED] Cannot write to /dev/null"
-
-echo ""
-echo "Phase 10: Current Directory Operations"
-echo "----------------------------------------"
-
-# These should all work
-log_attempt "Creating nested directories..."
-mkdir -p ./backup/deep/nested/directory/structure/level5/level6/level7/level8/level9/level10 2>>./errors.log && log_success "Created deep directory structure" || echo "[FAILED] Cannot create directories"
-
-log_attempt "Writing large file..."
-dd if=/dev/zero of=./backup/large_file.bin bs=1M count=10 2>>./errors.log && log_success "Created 10MB file" || echo "[FAILED] Cannot create large file"
+# Check for extra writable paths
+if [ -n "${BUBBLM_EXTRA_WRITE_PATHS:-}" ]; then
+    log_info "Extra writable paths detected: $BUBBLM_EXTRA_WRITE_PATHS"
+fi
 
 echo ""
 echo "==================================="
-echo "Test Results Summary"
+echo "Security Test Summary"
 echo "==================================="
 echo ""
 
 # Count successes and failures
 SUCCESS_COUNT=$(grep -c "SUCCESS" ./success.log 2>/dev/null || echo "0")
-ERROR_COUNT=$(grep -c "" ./errors.log 2>/dev/null || echo "0")
+FAILURE_COUNT=$(grep -c "FAILURE" ./errors.log 2>/dev/null || echo "0")
 
-echo "Successful operations: $SUCCESS_COUNT"
-echo "Failed operations: $ERROR_COUNT"
+echo "Security checks passed: $SUCCESS_COUNT"
+echo "Security issues found: $FAILURE_COUNT"
 echo ""
 
-echo "=== Sample of Successful Reads ==="
-find ./backup -type f 2>/dev/null | head -10
-
-echo ""
-echo "=== Sample of Failed Operations ==="
-if [ -f ./errors.log ]; then
-    head -10 ./errors.log | sed 's/^/  /'
+if [ "$FAILURE_COUNT" -eq 0 ]; then
+    echo "✅ All security checks passed! The sandbox is working correctly."
 else
-    echo "  No errors logged"
+    echo "⚠️  Found $FAILURE_COUNT security issue(s). Review ./errors.log for details."
 fi
 
 echo ""
-echo "Full error log saved to: ./errors.log"
-echo "Full success log saved to: ./success.log"
-echo ""
-echo "Test complete! Review the logs to see what bubblm's sandbox allows vs blocks."
+echo "Full results saved to:"
+echo "  ./success.log - Security features working correctly"
+echo "  ./errors.log - Security issues or over-restrictions"

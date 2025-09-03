@@ -2,6 +2,14 @@
 
 A lightweight sandboxing wrapper for Claude (Anthropic's coding assistant) and other commands with restricted filesystem access.
 
+## ⚠️ Disclaimer
+
+**USE AT YOUR OWN RISK.** This tool is experimental and provided "as is" without warranty of any kind. While BubbLM aims to provide sandboxing capabilities, it is not a complete security solution. Users are responsible for:
+- Understanding the security implications of running commands in the sandbox
+- Verifying the sandbox configuration meets their security requirements
+- Not relying on this tool as the sole security measure for untrusted code
+- Testing thoroughly in their own environment before production use
+
 ## What it does
 
 BubbLM creates a secure sandbox using bubblewrap where:
@@ -76,11 +84,11 @@ This runs MySQL on port 3307 with TCP authentication, avoiding privilege escalat
 
 ## Requirements
 
-- **WSL2 (Windows Subsystem for Linux)** - Currently only tested and supported on WSL2
+- **WSL2 on Windows 10** - Currently only tested on WSL2 (Windows Subsystem for Linux 2) on Windows 10
 - `bubblewrap` support
 - `sudo` access for installation
 
-> **Note**: Support for native Linux and other platforms is planned as future work. The current implementation includes WSL-specific DNS resolution handling that may need adjustment for other environments.
+> **Note**: This tool has only been tested on WSL2 running on Windows 10. Support for WSL1, Windows 11, native Linux, and other platforms is untested and may require adjustments. The current implementation includes WSL-specific handling that may not work correctly in other environments.
 
 ## Customizing for Other LLMs
 
