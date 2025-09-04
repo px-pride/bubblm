@@ -288,9 +288,10 @@ BWRAP_CMD=(
     --bind "$HOME/.claude-sandbox/config" "$HOME/.config"
     --bind "$HOME/.claude-sandbox/local" "$HOME/.local"
     
-    # Claude configuration files (if they exist)
-    --bind-try "$HOME/.claude" "$HOME/.claude"
-    --bind-try "$HOME/.claude.json" "$HOME/.claude.json"
+    # Claude configuration files (real files, writable)
+    # Use absolute paths as source to reference files outside the read-only namespace
+    --bind-try "$(realpath "$HOME/.claude")" "$HOME/.claude"
+    --bind-try "$(realpath "$HOME/.claude.json")" "$HOME/.claude.json"
     
     # Package manager caches (writable)
     --bind-try "$HOME/.npm" "$HOME/.npm"
