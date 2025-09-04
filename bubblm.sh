@@ -283,12 +283,6 @@ BWRAP_CMD=(
     # Home directory (read-only, with exceptions below)
     --ro-bind "$HOME" "$HOME"
     
-    # Project directory (writable)
-    --bind "$PROJECT_DIR" "$PROJECT_DIR"
-    
-    # Make .git/hooks read-only to prevent escape via git hooks
-    --ro-bind-try "$PROJECT_DIR/.git/hooks" "$PROJECT_DIR/.git/hooks"
-    
     # Claude sandbox directories (writable)
     --bind "$HOME/.claude-sandbox/cache" "$HOME/.cache"
     --bind "$HOME/.claude-sandbox/config" "$HOME/.config"
@@ -326,6 +320,12 @@ BWRAP_CMD=(
     
     # Mount /mnt for WSL compatibility (for /mnt/wslg)
     --ro-bind /mnt /mnt
+    
+    # Project directory (writable) - must come after /mnt mount to override it
+    --bind "$PROJECT_DIR" "$PROJECT_DIR"
+    
+    # Make .git/hooks read-only to prevent escape via git hooks - must be last
+    --ro-bind-try "$PROJECT_DIR/.git/hooks" "$PROJECT_DIR/.git/hooks"
     
     # Network access
     --share-net
