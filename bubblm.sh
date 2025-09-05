@@ -214,6 +214,25 @@ check_and_install_git_hooks
 mkdir -p "$HOME/.claude-sandbox/cache"
 mkdir -p "$HOME/.claude-sandbox/config"
 mkdir -p "$HOME/.claude-sandbox/local"
+mkdir -p "$HOME/.claude-sandbox/claude-config"
+
+# Initialize Claude config files in sandbox if they don't exist
+# These will be bind-mounted over the read-only locations
+if [ ! -f "$HOME/.claude-sandbox/claude-config/.claude.json" ]; then
+    if [ -f "$HOME/.claude.json" ]; then
+        cp "$HOME/.claude.json" "$HOME/.claude-sandbox/claude-config/.claude.json"
+    else
+        echo '{}' > "$HOME/.claude-sandbox/claude-config/.claude.json"
+    fi
+fi
+
+if [ ! -d "$HOME/.claude-sandbox/claude-config/.claude" ]; then
+    if [ -d "$HOME/.claude" ]; then
+        cp -r "$HOME/.claude" "$HOME/.claude-sandbox/claude-config/.claude"
+    else
+        mkdir -p "$HOME/.claude-sandbox/claude-config/.claude"
+    fi
+fi
 
 # Check if bubblewrap is installed
 if ! command -v bwrap &> /dev/null; then
@@ -288,10 +307,10 @@ BWRAP_CMD=(
     --bind "$HOME/.claude-sandbox/config" "$HOME/.config"
     --bind "$HOME/.claude-sandbox/local" "$HOME/.local"
     
-    # Claude configuration files (real files, writable)
-    # Use absolute paths as source to reference files outside the read-only namespace
-    --bind-try "$(realpath "$HOME/.claude")" "$HOME/.claude"
-    --bind-try "$(realpath "$HOME/.claude.json")" "$HOME/.claude.json"
+    # Claude configuration files (from sandbox, writable)
+    # Bind sandbox versions over the read-only home locations
+    --bind "$HOME/.claude-sandbox/claude-config/.claude" "$HOME/.claude"
+    --bind "$HOME/.claude-sandbox/claude-config/.claude.json" "$HOME/.claude.json"
     
     # Package manager caches (writable)
     --bind-try "$HOME/.npm" "$HOME/.npm"
