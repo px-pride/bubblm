@@ -2,6 +2,14 @@
 
 A lightweight sandboxing wrapper for Claude (Anthropic's coding assistant) and other commands with restricted filesystem access.
 
+## 🚨 CRITICAL NOTICE: Development On Hold
+
+**There are known critical issues with Claude configuration file writes in the sandbox environment.** Due to limitations in how bubblewrap handles bind mounts, Claude cannot properly write to its configuration files when the home directory is read-only. This causes Claude to crash with "EROFS: read-only file system" errors.
+
+The issue stems from Claude's atomic write operations (writing to temporary files then renaming) which require creating new files in the parent directory - something that fails when the parent is read-only, even if the target files are mounted as writable.
+
+Development is currently on hold while investigating alternative sandboxing solutions. Use with caution and expect Claude configuration operations to fail.
+
 ## ⚠️ Disclaimer
 
 **USE AT YOUR OWN RISK.** This tool is experimental and provided "as is" without warranty of any kind. While BubbLM aims to provide sandboxing capabilities, it is not a complete security solution. Users are responsible for:
